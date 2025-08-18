@@ -172,7 +172,7 @@ pub fn write_blob(device: &mut FidoKeyHid, credential_id: &[u8], data: &str) -> 
         result
     };
 
-    match device.write_large_blob(Some(pin.as_str()), final_data) {
+    match device.set_large_blob(&final_data, Some(pin.as_str())) {
         Ok(_) => {
             println!("Dados criptografados escritos no largeBlob com sucesso!");
             println!("Os dados estão agora protegidos por FIDO2 HMAC-secret!");
@@ -302,7 +302,7 @@ pub fn delete_single_entry(device: &mut FidoKeyHid, credential_id: &[u8]) -> Res
         
         println!("Escrevendo placeholder vazio... Toque na chave se piscar.");
         
-        match device.write_large_blob(Some(&pin), empty_placeholder) {
+        match device.set_large_blob(&empty_placeholder, Some(&pin)) {
             Ok(_) => {
                 println!("LargeBlob esvaziado com sucesso!");
             },
@@ -314,7 +314,7 @@ pub fn delete_single_entry(device: &mut FidoKeyHid, credential_id: &[u8]) -> Res
         let data = updated_entries.join("|").into_bytes();
         
         println!("Escrevendo dados atualizados... Toque na chave se piscar.");
-        match device.write_large_blob(Some(&pin), data) {
+        match device.set_large_blob(&data, Some(&pin)) {
             Ok(_) => {
                 println!("Entrada {} removida com sucesso!", key_index);
             },
