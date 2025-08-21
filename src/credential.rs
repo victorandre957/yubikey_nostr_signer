@@ -15,19 +15,19 @@ const RP_ID: &str = "example.com";
 const CHALLENGE: &[u8] = b"a-random-challenge-string";
 
 pub fn get_credential_id(device: &mut FidoKeyHid) -> Result<Vec<u8>> {
-    println!("Configurando credencial...");
+    println!("Setting up credential...");
     let pin = get_pin_from_user()?;
 
     if let Ok(assertion) = device.get_assertion(RP_ID, CHALLENGE, &[], Some(pin.as_str())) {
-        println!("Credencial encontrada.");
+        println!("Credential found.");
         return Ok(assertion.credential_id);
     }
 
-    println!("Criando nova credencial...");
+    println!("Creating new credential...");
     let user = PublicKeyCredentialUserEntity {
         id: b"user-id-for-large-blob".to_vec(),
-        name: "usuario.teste".to_string(),
-        display_name: "Usuário de Teste".to_string(),
+        name: "test.user".to_string(),
+        display_name: "Test User".to_string(),
     };
     
     let hmac_extension = MakeExtension::HmacSecret(Some(true));
@@ -47,9 +47,9 @@ pub fn get_credential_id(device: &mut FidoKeyHid) -> Result<Vec<u8>> {
     
     let attestation = device
         .make_credential_with_args(&args)
-        .context("Falha ao criar a credencial.")?;
+        .context("Failed to create credential.")?;
         
-    println!("Credencial criada com sucesso!");
+    println!("Credential created successfully!");
     Ok(attestation.credential_descriptor.id)
 }
 
@@ -67,7 +67,7 @@ pub fn get_hmac_secret(device: &mut FidoKeyHid, credential_id: &[u8], salt: &[u8
             Some(pin.as_str()),
             Some(&extensions),
         )
-        .context("Falha ao obter chave de criptografia")?;
+        .context("Failed to get encryption key")?;
     
     for extension in &assertion.extensions {
         if let AssertionExtension::HmacSecret(Some(hmac_secret)) = extension {
@@ -75,5 +75,5 @@ pub fn get_hmac_secret(device: &mut FidoKeyHid, credential_id: &[u8], salt: &[u8
         }
     }
     
-    Err(anyhow::anyhow!("Chave de criptografia não encontrada"))
+    Err(anyhow::anyhow!("Encryption key not found"))
 }

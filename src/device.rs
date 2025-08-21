@@ -8,7 +8,7 @@ use ctap_hid_fido2::{
 pub fn find_fido_device() -> Result<FidoKeyHid> {
     let devices = get_fidokey_devices();
     if devices.is_empty() {
-        return Err(anyhow!("Nenhum dispositivo FIDO2 HID conectado."));
+        return Err(anyhow!("No FIDO2 HID device connected."));
     }
     let cfg = LibCfg::init();
     FidoKeyHidFactory::create(&cfg)
