@@ -11,78 +11,76 @@ use crate::credential::get_hmac_secret;
 type Aes256CbcEnc = Encryptor<Aes256>;
 type Aes256CbcDec = Decryptor<Aes256>;
 
-/// Encrypt data using FIDO2 HMAC-secret derived key
 fn encrypt_data(device: &mut FidoKeyHid, credential_id: &[u8], plaintext: &str) -> Result<Vec<u8>> {
-    // Generate a random salt for HMAC-secret
     let mut salt = [0u8; 32];
     rand::thread_rng().fill(&mut salt);
     
-    // Get HMAC secret from FIDO2 device
     let hmac_secret = get_hmac_secret(device, credential_id, &salt)
-        .context("Failed to get HMAC secret from authenticator")?;
+        .context("Falha ao obter chave de criptografia")?;
     
-    // Generate random IV
     let mut iv = [0u8; 16];
     rand::thread_rng().fill(&mut iv);
     
-    // Prepare data for encryption with PKCS7 padding
     let mut buffer = plaintext.as_bytes().to_vec();
     let original_len = buffer.len();
     let padding_len = 16 - (buffer.len() % 16);
     buffer.extend(vec![padding_len as u8; padding_len]);
     
-    // Encrypt the data
     let cipher = Aes256CbcEnc::new(&hmac_secret.into(), &iv.into());
     let ciphertext = cipher.encrypt_padded_mut::<aes::cipher::block_padding::Pkcs7>(&mut buffer, original_len)
-        .map_err(|e| anyhow!("Encryption failed: {}", e))?;
+        .map_err(|e| anyhow!("Falha na criptografia: {}", e))?;
     
-    // Combine salt + iv + ciphertext
     let mut result = Vec::new();
-    result.extend_from_slice(&salt);     // 32 bytes
-    result.extend_from_slice(&iv);       // 16 bytes  
-    result.extend_from_slice(ciphertext); // variable length
+    result.extend_from_slice(&salt);
+    result.extend_from_slice(&iv);
+    result.extend_from_slice(ciphertext);
     
     Ok(result)
 }
 
-/// Decrypt data using FIDO2 HMAC-secret derived key
 fn decrypt_data(device: &mut FidoKeyHid, credential_id: &[u8], encrypted_data: &[u8]) -> Result<String> {
-    if encrypted_data.len() < 48 { // 32 (salt) + 16 (iv) = 48 minimum
-        return Err(anyhow!("Invalid encrypted data format"));
+    if encrypted_data.len() < 48 {
+        return Err(anyhow!("Dados criptografados inválidos"));
     }
     
-    // Extract salt, iv, and ciphertext
     let salt: [u8; 32] = encrypted_data[0..32].try_into()
-        .map_err(|_| anyhow!("Failed to extract salt"))?;
+        .map_err(|_| anyhow!("Erro ao extrair dados de descriptografia"))?;
     let iv: [u8; 16] = encrypted_data[32..48].try_into()
-        .map_err(|_| anyhow!("Failed to extract IV"))?;
+        .map_err(|_| anyhow!("Erro ao extrair dados de descriptografia"))?;
     let ciphertext = &encrypted_data[48..];
     
-    // Get HMAC secret from FIDO2 device using the same salt
     let hmac_secret = get_hmac_secret(device, credential_id, &salt)
-        .context("Failed to get HMAC secret from authenticator")?;
+        .context("Falha ao obter chave de descriptografia")?;
     
-    // Decrypt the data
     let cipher = Aes256CbcDec::new(&hmac_secret.into(), &iv.into());
     let mut buffer = ciphertext.to_vec();
     
     let plaintext = cipher.decrypt_padded_mut::<aes::cipher::block_padding::Pkcs7>(&mut buffer)
-        .map_err(|e| anyhow!("Decryption failed: {}", e))?;
+        .map_err(|e| anyhow!("Falha na descriptografia: {}", e))?;
     
     String::from_utf8(plaintext.to_vec())
-        .context("Failed to convert decrypted data to string")
+        .context("Dados descriptografados inválidos")
 }
 
 pub fn write_blob(device: &mut FidoKeyHid, credential_id: &[u8], data: &str) -> Result<()> {
-    println!("Iniciando escrita no largeBlob com criptografia FIDO2 HMAC-secret...");
+    print!("Digite um ID/nome para identificar esta entrada: ");
+    io::stdout().flush()?;
+    let mut id_input = String::new();
+    io::stdin().read_line(&mut id_input)?;
+    let entry_id = id_input.trim();
     
-    // Encrypt the data using FIDO2 HMAC-secret
+    if entry_id.is_empty() {
+        println!("ID não pode estar vazio.");
+        return Ok(());
+    }
+    
+    println!("Criptografando dados...");
+    
     let encrypted_data = encrypt_data(device, credential_id, data)
         .context("Falha ao criptografar os dados")?;
     
-    let encrypted_hex = hex::encode(&encrypted_data);
-    println!("Dados criptografados e prontos para armazenamento!");
-    
+    // Format: "ID:encrypted_hex"
+    let entry_with_id = format!("{}:{}", entry_id, hex::encode(&encrypted_data));
     let pin = get_pin_from_user()?;
     
     let existing_result = device.get_large_blob();
@@ -95,28 +93,33 @@ pub fn write_blob(device: &mut FidoKeyHid, credential_id: &[u8], data: &str) -> 
                     combined_data = Vec::new();
                 } else {
                     let max_size = 1024;
-                    let needed_space = existing.large_blob_array.len() + encrypted_hex.len() + 1;
+                    let needed_space = existing.large_blob_array.len() + entry_with_id.len() + 1;
                     
                     if needed_space > max_size {
-                        println!("Não há espaço suficiente no largeBlob!");
-                        println!("Espaço usado: {} bytes", existing.large_blob_array.len());
-                        println!("Espaço necessário: {} bytes", needed_space);
-                        println!("Espaço máximo: {} bytes", max_size);
+                        println!("Espaço insuficiente ({}/{} bytes).", needed_space, max_size);
                         
-                        // Show existing data (encrypted)
                         let entries: Vec<&str> = existing_str.split('|').collect();
-                        println!("\nEntradas existentes (criptografadas):");
+                        println!("\nEntradas existentes:");
                         for (i, entry) in entries.iter().enumerate() {
                             if !entry.is_empty() {
-                                if let Ok(encrypted_bytes) = hex::decode(entry) {
-                                    match decrypt_data(device, credential_id, &encrypted_bytes) {
-                                        Ok(decrypted_str) => {
-                                            println!("{}: {}", i + 1, decrypted_str);
+                                if let Some(colon_pos) = entry.find(':') {
+                                    let entry_id = &entry[..colon_pos];
+                                    let encrypted_hex = &entry[colon_pos + 1..];
+                                    
+                                    if let Ok(encrypted_bytes) = hex::decode(encrypted_hex) {
+                                        match decrypt_data(device, credential_id, &encrypted_bytes) {
+                                            Ok(decrypted_str) => {
+                                                println!("{}: {} - {}", i + 1, entry_id, decrypted_str);
+                                            }
+                                            Err(_) => {
+                                                println!("{}: {} - (erro na descriptografia)", i + 1, entry_id);
+                                            }
                                         }
-                                        Err(_) => {
-                                            println!("{}: (erro na descriptografia)", i + 1);
-                                        }
+                                    } else {
+                                        println!("{}: {} - (dados corrompidos)", i + 1, entry_id);
                                     }
+                                } else {
+                                    println!("{}: (formato antigo sem ID)", i + 1);
                                 }
                             }
                         }
@@ -155,27 +158,23 @@ pub fn write_blob(device: &mut FidoKeyHid, credential_id: &[u8], data: &str) -> 
                     }
                 }
             } else {
-                println!("Não foi possível decodificar os dados existentes como string UTF-8.");
                 return Err(anyhow!("Dados inválidos no largeBlob"));
             }
         }
-    } else {
-        println!("Nenhum dado existente encontrado ou erro ao ler. Começando com blob vazio.");
     }
 
     let final_data = if combined_data.is_empty() {
-        encrypted_hex.into_bytes()
+        entry_with_id.into_bytes()
     } else {
         let mut result = combined_data;
         result.push(b'|');
-        result.extend_from_slice(encrypted_hex.as_bytes());
+        result.extend_from_slice(entry_with_id.as_bytes());
         result
     };
 
     match device.write_large_blob(Some(pin.as_str()), final_data) {
         Ok(_) => {
-            println!("Dados criptografados escritos no largeBlob com sucesso!");
-            println!("Os dados estão agora protegidos por FIDO2 HMAC-secret!");
+            println!("Dados salvos com sucesso!");
         }
         Err(e) => {
             return Err(anyhow!("Erro ao escrever no largeBlob: {}", e));
@@ -186,58 +185,99 @@ pub fn write_blob(device: &mut FidoKeyHid, credential_id: &[u8], data: &str) -> 
 }
 
 pub fn read_blob(device: &mut FidoKeyHid, credential_id: &[u8]) -> Result<()> {
-    println!("Iniciando leitura do largeBlob com descriptografia FIDO2 HMAC-secret...");
+    println!("Lendo dados...");
     
     let result = device.get_large_blob()
         .context("Falha ao ler do largeBlob.")?;
     
     if result.large_blob_array.is_empty() {
         println!("O largeBlob está vazio.");
-    } else {
-        println!("Dados lidos do largeBlob! Descriptografando...");
-        println!("Tamanho total: {} bytes", result.large_blob_array.len());
+        return Ok(());
+    }
+
+    if let Ok(blob_content) = String::from_utf8(result.large_blob_array.clone()) {
+        if blob_content == hex::encode("EMPTY") {
+            println!("O largeBlob está vazio.");
+            return Ok(());
+        }
         
-        if let Ok(blob_content) = String::from_utf8(result.large_blob_array.clone()) {
-            if blob_content == hex::encode("EMPTY") {
-                println!("O largeBlob foi esvaziado (contém placeholder vazio).");
-                return Ok(());
+        let entries: Vec<&str> = blob_content.split('|').collect();
+        let non_empty_entries: Vec<&str> = entries.iter().filter(|e| !e.is_empty()).cloned().collect();
+        
+        if non_empty_entries.is_empty() {
+            println!("Nenhuma entrada encontrada.");
+            return Ok(());
+        }
+        
+        println!("Encontradas {} entrada(s):", non_empty_entries.len());
+        for (i, entry) in non_empty_entries.iter().enumerate() {
+            if let Some(colon_pos) = entry.find(':') {
+                let entry_id = &entry[..colon_pos];
+                println!("{}: {}", i + 1, entry_id);
+            } else {
+                println!("{}: (entrada sem ID)", i + 1);
             }
+        }
+        
+        print!("Digite o número da entrada para descriptografar (ou 0 para voltar): ");
+        io::stdout().flush()?;
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let choice: usize = input.trim().parse().unwrap_or(0);
+        
+        if choice == 0 || choice > non_empty_entries.len() {
+            return Ok(());
+        }
+        
+        let selected_entry = non_empty_entries[choice - 1];
+        if let Some(colon_pos) = selected_entry.find(':') {
+            let entry_id = &selected_entry[..colon_pos];
+            let encrypted_hex = &selected_entry[colon_pos + 1..];
             
-            let entries: Vec<&str> = blob_content.split('|').collect();
-            let non_empty_entries: Vec<&str> = entries.iter().filter(|e| !e.is_empty()).cloned().collect();
-            println!("Total de entradas criptografadas: {}", non_empty_entries.len());
-            
-            for (i, entry) in non_empty_entries.iter().enumerate() {
-                match hex::decode(entry) {
-                    Ok(encrypted_bytes) => {
-                        match decrypt_data(device, credential_id, &encrypted_bytes) {
-                            Ok(decrypted_str) => {
-                                println!("Entrada {}: \"{}\"", i + 1, decrypted_str);
-                            }
-                            Err(e) => {
-                                println!("Entrada {}: (erro na descriptografia: {})", i + 1, e);
-                            }
+            match hex::decode(encrypted_hex) {
+                Ok(encrypted_bytes) => {
+                    match decrypt_data(device, credential_id, &encrypted_bytes) {
+                        Ok(decrypted_str) => {
+                            println!("{}: \"{}\"", entry_id, decrypted_str);
+                        }
+                        Err(_) => {
+                            println!("Erro na descriptografia de '{}'", entry_id);
                         }
                     }
-                    Err(_) => {
-                        println!("Entrada {}: (formato hex inválido) \"{}\"", i + 1, entry);
-                    }
+                }
+                Err(_) => {
+                    println!("Dados corrompidos em '{}'", entry_id);
                 }
             }
         } else {
-            println!("Conteúdo (bytes brutos): {:?}", result.large_blob_array);
+            // Handle old format without ID
+            match hex::decode(selected_entry) {
+                Ok(encrypted_bytes) => {
+                    match decrypt_data(device, credential_id, &encrypted_bytes) {
+                        Ok(decrypted_str) => {
+                            println!("Entrada {}: \"{}\"", choice, decrypted_str);
+                        }
+                        Err(_) => {
+                            println!("Erro na descriptografia da entrada {}", choice);
+                        }
+                    }
+                }
+                Err(_) => {
+                    println!("Dados corrompidos na entrada {}", choice);
+                }
+            }
         }
+    } else {
+        println!("Dados em formato inválido no largeBlob.");
     }
     Ok(())
 }
 
-pub fn delete_single_entry(device: &mut FidoKeyHid, credential_id: &[u8]) -> Result<()> {
-    println!("Lendo entradas existentes...");
-    
+pub fn delete_single_entry(device: &mut FidoKeyHid) -> Result<()> {
     let current_blob = match device.get_large_blob() {
         Ok(response) => {
             if response.large_blob_array.is_empty() {
-                println!("O largeBlob está vazio. Nada para apagar.");
+                println!("O largeBlob está vazio.");
                 return Ok(());
             }
             response.large_blob_array
@@ -246,10 +286,10 @@ pub fn delete_single_entry(device: &mut FidoKeyHid, credential_id: &[u8]) -> Res
     };
 
     let blob_content = String::from_utf8(current_blob)
-        .context("Não foi possível decodificar os dados existentes.")?;
+        .context("Dados inválidos no largeBlob")?;
     
     if blob_content == hex::encode("EMPTY") {
-        println!("O largeBlob está vazio (contém placeholder). Nada para apagar.");
+        println!("O largeBlob está vazio.");
         return Ok(());
     }
     
@@ -261,22 +301,13 @@ pub fn delete_single_entry(device: &mut FidoKeyHid, credential_id: &[u8]) -> Res
         return Ok(());
     }
     
-    println!("\nEntradas existentes (descriptografando...):");
+    println!("\nEntradas existentes:");
     for (i, entry) in non_empty_entries.iter().enumerate() {
-        match hex::decode(entry) {
-            Ok(encrypted_bytes) => {
-                match decrypt_data(device, credential_id, &encrypted_bytes) {
-                    Ok(decrypted_str) => {
-                        println!("{}: \"{}\"", i + 1, decrypted_str);
-                    }
-                    Err(_) => {
-                        println!("{}: (erro na descriptografia)", i + 1);
-                    }
-                }
-            }
-            Err(_) => {
-                println!("{}: (formato hex inválido)", i + 1);
-            }
+        if let Some(colon_pos) = entry.find(':') {
+            let entry_id = &entry[..colon_pos];
+            println!("{}: {}", i + 1, entry_id);
+        } else {
+            println!("{}: (entrada sem ID)", i + 1);
         }
     }
     
@@ -297,29 +328,25 @@ pub fn delete_single_entry(device: &mut FidoKeyHid, credential_id: &[u8]) -> Res
     let pin = get_pin_from_user()?;
     
     if updated_entries.is_empty() {
-        println!("Esvaziando largeBlob completamente...");
         let empty_placeholder = hex::encode("EMPTY").into_bytes();
-        
-        println!("Escrevendo placeholder vazio... Toque na chave se piscar.");
         
         match device.write_large_blob(Some(&pin), empty_placeholder) {
             Ok(_) => {
-                println!("LargeBlob esvaziado com sucesso!");
+                println!("LargeBlob esvaziado!");
             },
             Err(e) => {
-                return Err(anyhow!("Falha ao esvaziar o largeBlob: {}. Tente novamente ou verifique se a chave está desbloqueada.", e));
+                return Err(anyhow!("Falha ao esvaziar: {}", e));
             }
         }
     } else {
         let data = updated_entries.join("|").into_bytes();
         
-        println!("Escrevendo dados atualizados... Toque na chave se piscar.");
         match device.write_large_blob(Some(&pin), data) {
             Ok(_) => {
-                println!("Entrada {} removida com sucesso!", key_index);
+                println!("Entrada removida!");
             },
             Err(e) => {
-                return Err(anyhow!("Falha ao atualizar o largeBlob: {}. Tente novamente ou verifique se a chave está desbloqueada.", e));
+                return Err(anyhow!("Falha ao atualizar: {}", e));
             }
         }
     }
