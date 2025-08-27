@@ -16,10 +16,15 @@ const CHALLENGE: &[u8] = b"a-random-challenge-string";
 
 pub fn get_credential_id(device: &mut FidoKeyHid) -> Result<Vec<u8>> {
     println!("Setting up credential...");
-    let pin = get_pin_from_user()?;
+    let mut pin = get_pin_from_user()?;
 
     if let Ok(assertion) = device.get_assertion(RP_ID, CHALLENGE, &[], Some(pin.as_str())) {
         println!("Credential found.");
+        unsafe {
+            let bytes = pin.as_bytes_mut();
+            bytes.fill(0);
+        }
+        
         return Ok(assertion.credential_id);
     }
 
@@ -48,13 +53,18 @@ pub fn get_credential_id(device: &mut FidoKeyHid) -> Result<Vec<u8>> {
     let attestation = device
         .make_credential_with_args(&args)
         .context("Failed to create credential.")?;
+    
+    unsafe {
+        let bytes = pin.as_bytes_mut();
+        bytes.fill(0);
+    }
         
     println!("Credential created successfully!");
     Ok(attestation.credential_descriptor.id)
 }
 
 pub fn get_hmac_secret(device: &mut FidoKeyHid, credential_id: &[u8], salt: &[u8; 32]) -> Result<[u8; 32]> {
-    let pin = get_pin_from_user()?;
+    let mut pin = get_pin_from_user()?;
     
     let hmac_extension = GetExtension::HmacSecret(Some(*salt));
     let extensions = vec![hmac_extension];
@@ -68,6 +78,11 @@ pub fn get_hmac_secret(device: &mut FidoKeyHid, credential_id: &[u8], salt: &[u8
             Some(&extensions),
         )
         .context("Failed to get encryption key")?;
+    
+    unsafe {
+        let bytes = pin.as_bytes_mut();
+        bytes.fill(0);
+    }
     
     for extension in &assertion.extensions {
         if let AssertionExtension::HmacSecret(Some(hmac_secret)) = extension {

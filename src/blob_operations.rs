@@ -15,7 +15,7 @@ fn encrypt_data(device: &mut FidoKeyHid, credential_id: &[u8], plaintext: &str) 
     let mut salt = [0u8; 32];
     rand::rng().fill(&mut salt);
     
-    let hmac_secret = get_hmac_secret(device, credential_id, &salt)
+    let mut hmac_secret = get_hmac_secret(device, credential_id, &salt)
         .context("Failed to get encryption key")?;
     
     let mut iv = [0u8; 16];
@@ -35,6 +35,9 @@ fn encrypt_data(device: &mut FidoKeyHid, credential_id: &[u8], plaintext: &str) 
     result.extend_from_slice(&iv);
     result.extend_from_slice(ciphertext);
     
+    hmac_secret.fill(0);
+    buffer.fill(0);
+    
     Ok(result)
 }
 
@@ -49,8 +52,8 @@ fn decrypt_data(device: &mut FidoKeyHid, credential_id: &[u8], encrypted_data: &
         .map_err(|_| anyhow!("Error extracting decryption data"))?;
     let ciphertext = &encrypted_data[48..];
     
-    let hmac_secret = get_hmac_secret(device, credential_id, &salt)
-        .context("Falha ao obter chave de descriptografia")?;
+    let mut hmac_secret = get_hmac_secret(device, credential_id, &salt)
+        .context("Error extracting decryption Key")?;
     
     let cipher = Aes256CbcDec::new(&hmac_secret.into(), &iv.into());
     let mut buffer = ciphertext.to_vec();
@@ -58,8 +61,13 @@ fn decrypt_data(device: &mut FidoKeyHid, credential_id: &[u8], encrypted_data: &
     let plaintext = cipher.decrypt_padded_mut::<aes::cipher::block_padding::Pkcs7>(&mut buffer)
         .map_err(|e| anyhow!("Decryption failed: {}", e))?;
     
-    String::from_utf8(plaintext.to_vec())
-        .context("Dados descriptografados inválidos")
+    let result = String::from_utf8(plaintext.to_vec())
+        .context("Invalid decrypted data")?;
+    
+    hmac_secret.fill(0);
+    buffer.fill(0);
+    
+    Ok(result)
 }
 
 pub fn write_blob(device: &mut FidoKeyHid, credential_id: &[u8], data: &str) -> Result<()> {
@@ -81,7 +89,6 @@ pub fn write_blob(device: &mut FidoKeyHid, credential_id: &[u8], data: &str) -> 
     
     // Format: "ID:encrypted_hex"
     let entry_with_id = format!("{}:{}", entry_id, hex::encode(&encrypted_data));
-    let pin = get_pin_from_user()?;
     
     let existing_result = device.get_large_blob();
     let mut combined_data = Vec::new();
@@ -104,20 +111,7 @@ pub fn write_blob(device: &mut FidoKeyHid, credential_id: &[u8], data: &str) -> 
                             if !entry.is_empty() {
                                 if let Some(colon_pos) = entry.find(':') {
                                     let entry_id = &entry[..colon_pos];
-                                    let encrypted_hex = &entry[colon_pos + 1..];
-                                    
-                                    if let Ok(encrypted_bytes) = hex::decode(encrypted_hex) {
-                                        match decrypt_data(device, credential_id, &encrypted_bytes) {
-                                            Ok(decrypted_str) => {
-                                                println!("{}: {} - {}", i + 1, entry_id, decrypted_str);
-                                            }
-                                            Err(_) => {
-                                                println!("{}: {} - (decryption error)", i + 1, entry_id);
-                                            }
-                                        }
-                                    } else {
-                                        println!("{}: {} - (corrupted data)", i + 1, entry_id);
-                                    }
+                                    println!("{}: {}", i + 1, entry_id);
                                 } else {
                                     println!("{}: (legacy format without ID)", i + 1);
                                 }
@@ -172,13 +166,25 @@ pub fn write_blob(device: &mut FidoKeyHid, credential_id: &[u8], data: &str) -> 
         result
     };
 
+    // Request PIN only when needed for the write operation
+    let mut pin = get_pin_from_user()?;
     match device.write_large_blob(Some(pin.as_str()), final_data) {
         Ok(_) => {
             println!("✓ Data encrypted and stored successfully!");
         }
         Err(e) => {
+            // Clear PIN from memory before returning error
+            unsafe {
+                let bytes = pin.as_bytes_mut();
+                bytes.fill(0);
+            }
             return Err(anyhow!("Error writing to largeBlob: {}", e));
         }
+    }
+    
+    unsafe {
+        let bytes = pin.as_bytes_mut();
+        bytes.fill(0);
     }
 
     Ok(())
@@ -325,7 +331,8 @@ pub fn delete_single_entry(device: &mut FidoKeyHid) -> Result<()> {
     let mut updated_entries = non_empty_entries;
     updated_entries.remove(key_index - 1);
 
-    let pin = get_pin_from_user()?;
+    // Request PIN only when needed for the write operation
+    let mut pin = get_pin_from_user()?;
     
     if updated_entries.is_empty() {
         let empty_placeholder = hex::encode("EMPTY").into_bytes();
@@ -335,6 +342,11 @@ pub fn delete_single_entry(device: &mut FidoKeyHid) -> Result<()> {
                 println!("✓ LargeBlob cleared!");
             },
             Err(e) => {
+                // Clear PIN from memory before returning error
+                unsafe {
+                    let bytes = pin.as_bytes_mut();
+                    bytes.fill(0);
+                }
                 return Err(anyhow!("Failed to clear: {}", e));
             }
         }
@@ -346,9 +358,19 @@ pub fn delete_single_entry(device: &mut FidoKeyHid) -> Result<()> {
                 println!("✓ Entry deleted successfully!");
             },
             Err(e) => {
+                // Clear PIN from memory before returning error
+                unsafe {
+                    let bytes = pin.as_bytes_mut();
+                    bytes.fill(0);
+                }
                 return Err(anyhow!("Failed to update: {}", e));
             }
         }
+    }
+    
+    unsafe {
+        let bytes = pin.as_bytes_mut();
+        bytes.fill(0);
     }
     
     Ok(())
