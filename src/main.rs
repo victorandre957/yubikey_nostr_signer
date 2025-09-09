@@ -2,6 +2,7 @@ mod auth;
 mod device;
 mod credential;
 mod blob_operations;
+mod encryption;
 
 use anyhow::{anyhow, Context, Result};
 use std::io::{self, Write};
