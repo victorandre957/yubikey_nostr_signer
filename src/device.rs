@@ -1,8 +1,7 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use ctap_hid_fido2::{
-    get_fidokey_devices, FidoKeyHidFactory, LibCfg,
-    fidokey::FidoKeyHid,
-    fidokey::get_info::InfoOption,
+    FidoKeyHidFactory, LibCfg, fidokey::FidoKeyHid, fidokey::get_info::InfoOption,
+    get_fidokey_devices,
 };
 
 pub fn find_fido_device() -> Result<FidoKeyHid> {

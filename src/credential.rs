@@ -1,15 +1,15 @@
+use crate::auth::get_pin_from_user;
 use anyhow::{Context, Result};
 use ctap_hid_fido2::{
-    public_key_credential_user_entity::PublicKeyCredentialUserEntity,
     fidokey::FidoKeyHid,
-    fidokey::make_credential::make_credential_params::{
-        Extension as MakeExtension,
-        MakeCredentialArgs,
-        CredentialSupportedKeyType,
+    fidokey::get_assertion::get_assertion_params::{
+        Extension as GetExtension, Extension as AssertionExtension,
     },
-    fidokey::get_assertion::get_assertion_params::{Extension as GetExtension, Extension as AssertionExtension},
+    fidokey::make_credential::make_credential_params::{
+        CredentialSupportedKeyType, Extension as MakeExtension, MakeCredentialArgs,
+    },
+    public_key_credential_user_entity::PublicKeyCredentialUserEntity,
 };
-use crate::auth::get_pin_from_user;
 
 const RP_ID: &str = "example.com";
 const CHALLENGE: &[u8] = b"a-random-challenge-string";
@@ -24,7 +24,7 @@ pub fn get_credential_id(device: &mut FidoKeyHid) -> Result<Vec<u8>> {
             let bytes = pin.as_bytes_mut();
             bytes.fill(0);
         }
-        
+
         return Ok(assertion.credential_id);
     }
 
@@ -34,10 +34,10 @@ pub fn get_credential_id(device: &mut FidoKeyHid) -> Result<Vec<u8>> {
         name: "test.user".to_string(),
         display_name: "Test User".to_string(),
     };
-    
+
     let hmac_extension = MakeExtension::HmacSecret(Some(true));
     let extensions = vec![hmac_extension];
-    
+
     let args = MakeCredentialArgs {
         rpid: RP_ID.to_string(),
         challenge: CHALLENGE.to_vec(),
@@ -49,26 +49,30 @@ pub fn get_credential_id(device: &mut FidoKeyHid) -> Result<Vec<u8>> {
         rk: Some(true),
         extensions: Some(extensions),
     };
-    
+
     let attestation = device
         .make_credential_with_args(&args)
         .context("Failed to create credential.")?;
-    
+
     unsafe {
         let bytes = pin.as_bytes_mut();
         bytes.fill(0);
     }
-        
+
     println!("Credential created successfully!");
     Ok(attestation.credential_descriptor.id)
 }
 
-pub fn get_hmac_secret(device: &mut FidoKeyHid, credential_id: &[u8], salt: &[u8; 32]) -> Result<[u8; 32]> {
+pub fn get_hmac_secret(
+    device: &mut FidoKeyHid,
+    credential_id: &[u8],
+    salt: &[u8; 32],
+) -> Result<[u8; 32]> {
     let mut pin = get_pin_from_user()?;
-    
+
     let hmac_extension = GetExtension::HmacSecret(Some(*salt));
     let extensions = vec![hmac_extension];
-    
+
     let assertion = device
         .get_assertion_with_extensios(
             RP_ID,
@@ -78,17 +82,17 @@ pub fn get_hmac_secret(device: &mut FidoKeyHid, credential_id: &[u8], salt: &[u8
             Some(&extensions),
         )
         .context("Failed to get encryption key")?;
-    
+
     unsafe {
         let bytes = pin.as_bytes_mut();
         bytes.fill(0);
     }
-    
+
     for extension in &assertion.extensions {
         if let AssertionExtension::HmacSecret(Some(hmac_secret)) = extension {
             return Ok(*hmac_secret);
         }
     }
-    
+
     Err(anyhow::anyhow!("Encryption key not found"))
 }

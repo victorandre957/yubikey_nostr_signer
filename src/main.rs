@@ -1,15 +1,15 @@
 mod auth;
-mod device;
-mod credential;
 mod blob_operations;
+mod credential;
+mod device;
 mod encryption;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::io::{self, Write};
 
-use device::{find_fido_device, is_supported};
+use blob_operations::{delete_single_entry, read_blob, write_blob};
 use credential::get_credential_id;
-use blob_operations::{write_blob, read_blob, delete_single_entry};
+use device::{find_fido_device, is_supported};
 
 fn main() -> Result<()> {
     let mut device = find_fido_device().context("No FIDO2 device found.")?;
@@ -19,8 +19,8 @@ fn main() -> Result<()> {
         return Err(anyhow!("This device does not support largeBlob."));
     }
 
-    let credential_id = get_credential_id(&mut device)
-        .context("Failed to configure credential.")?;
+    let credential_id =
+        get_credential_id(&mut device).context("Failed to configure credential.")?;
 
     loop {
         println!("\nSelect an option:");
@@ -42,7 +42,7 @@ fn main() -> Result<()> {
                 let mut data_input = String::new();
                 io::stdin().read_line(&mut data_input)?;
                 let data_to_write = data_input.trim();
-                
+
                 if let Err(e) = write_blob(&mut device, &credential_id, data_to_write) {
                     println!("Error: {}", e);
                 }
