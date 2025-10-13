@@ -37,8 +37,8 @@ fn get_user_choice(prompt: &str) -> Result<usize> {
 // BLOB DATA PARSING AND VALIDATION FUNCTIONS
 // =============================================================================
 
-/// Parses blob content and returns non-empty entries
-fn parse_blob_entries(blob_content: &str) -> Vec<String> {
+/// Parses blob content and returns non-empty entries (public for use by other modules)
+pub fn parse_blob_entries(blob_content: &str) -> Vec<String> {
     if blob_content == general_purpose::STANDARD.encode("EMPTY") {
         return Vec::new();
     }
@@ -63,8 +63,8 @@ fn is_blob_empty(blob_data: &[u8]) -> bool {
     }
 }
 
-/// Gets existing blob content as string
-fn get_blob_content(device: &mut FidoKeyHid) -> Result<Option<String>> {
+/// Gets existing blob content as string (public for use by other modules)
+pub fn get_blob_content(device: &mut FidoKeyHid) -> Result<Option<String>> {
     let result = device
         .get_large_blob()
         .context("Failed to read from largeBlob")?;
@@ -258,7 +258,98 @@ pub fn write_blob(device: &mut FidoKeyHid, credential_id: &[u8], data: &str) -> 
     Ok(())
 }
 
+/// Selects an entry interactively and returns its decrypted content
+pub fn select_and_read_entry(device: &mut FidoKeyHid, credential_id: &[u8]) -> Result<(usize, Vec<u8>)> {
+    let blob_content = match get_blob_content(device)? {
+        Some(content) => content,
+        None => {
+            return Err(anyhow!("O largeBlob está vazio"));
+        }
+    };
+
+    let entries = parse_blob_entries(&blob_content);
+
+    if entries.is_empty() {
+        return Err(anyhow!("Nenhuma entrada encontrada"));
+    }
+
+    // Exibe as entradas disponíveis
+    println!("\n📋 Entradas disponíveis:");
+    for (i, entry) in entries.iter().enumerate() {
+        if let Some(colon_pos) = entry.find(':') {
+            let entry_id = &entry[..colon_pos];
+            println!("   {}. {}", i + 1, entry_id);
+        } else {
+            println!("   {}. (entrada sem ID)", i + 1);
+        }
+    }
+
+    // Solicita escolha do usuário
+    print!("\n🔑 Escolha qual entrada usar (1-{}): ", entries.len());
+    io::stdout().flush()?;
+    
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let choice: usize = input.trim().parse()
+        .context("Entrada inválida")?;
+
+    if choice == 0 || choice > entries.len() {
+        return Err(anyhow!("Escolha inválida"));
+    }
+
+    let selected_entry_index = choice - 1;
+    let selected_entry = &entries[selected_entry_index];
+
+    // Descriptografa a entrada
+    let decrypted = decrypt_entry_raw(device, credential_id, selected_entry)?;
+
+    Ok((selected_entry_index, decrypted))
+}
+
+/// Decrypts a specific entry by index (0-based)
+pub fn read_blob_entry_by_index(device: &mut FidoKeyHid, credential_id: &[u8], index: usize) -> Result<Vec<u8>> {
+    let blob_content = match get_blob_content(device)? {
+        Some(content) => content,
+        None => {
+            return Err(anyhow!("O largeBlob está vazio"));
+        }
+    };
+
+    let entries = parse_blob_entries(&blob_content);
+
+    if index >= entries.len() {
+        return Err(anyhow!("Índice de entrada inválido"));
+    }
+
+    let entry = &entries[index];
+    decrypt_entry_raw(device, credential_id, entry)
+}
+
+/// Helper function to decrypt an entry string
+fn decrypt_entry_raw(device: &mut FidoKeyHid, credential_id: &[u8], entry: &str) -> Result<Vec<u8>> {
+    if let Some(colon_pos) = entry.find(':') {
+        let encrypted_base64 = &entry[colon_pos + 1..];
+        let encrypted_bytes = general_purpose::STANDARD.decode(encrypted_base64)
+            .context("Falha ao decodificar base64")?;
+        let decrypted_str = decrypt_data(device, credential_id, &encrypted_bytes)?;
+        Ok(decrypted_str.into_bytes())
+    } else {
+        // Formato antigo sem ID - tenta base64
+        if let Ok(encrypted_bytes) = general_purpose::STANDARD.decode(entry) {
+            let decrypted_str = decrypt_data(device, credential_id, &encrypted_bytes)?;
+            Ok(decrypted_str.into_bytes())
+        } else if let Ok(encrypted_bytes) = hex::decode(entry) {
+            // Fallback para hex
+            let decrypted_str = decrypt_data(device, credential_id, &encrypted_bytes)?;
+            Ok(decrypted_str.into_bytes())
+        } else {
+            Err(anyhow!("Formato de entrada inválido"))
+        }
+    }
+}
+
 /// Returns the decrypted data from a specific entry by ID (for programmatic use)
+#[allow(dead_code)]
 pub fn read_blob_entry(device: &mut FidoKeyHid, credential_id: &[u8], entry_id: &str) -> Result<Vec<u8>> {
     let blob_content = match get_blob_content(device)? {
         Some(content) => content,
