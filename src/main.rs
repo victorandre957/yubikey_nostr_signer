@@ -119,16 +119,28 @@ async fn start_bunker() -> Result<()> {
     println!("\n🚀 Iniciando Nostr Bunker com YubiKey...\n");
     println!("============================================================\n");
 
-    // Lista de relays
-    let relays = vec![
-        "wss://relay.damus.io",
-        "wss://nos.lol",
-        "wss://relay.nostr.band",
-    ];
+    // Carrega arquivo .env (obrigatório)
+    dotenvy::dotenv()
+        .context("Arquivo .env não encontrado. Crie um arquivo .env com NOSTR_RELAYS configurado.")?;
+
+    // Lê relays do .env (obrigatório)
+    let relays_str = std::env::var("NOSTR_RELAYS")
+        .context("NOSTR_RELAYS não definido no .env. Adicione: NOSTR_RELAYS=wss://relay1.io,wss://relay2.io")?;
+
+    // Separa os relays por vírgula
+    let relays: Vec<&str> = relays_str
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if relays.is_empty() {
+        anyhow::bail!("Nenhum relay configurado em NOSTR_RELAYS");
+    }
 
     println!("📡 Relays configurados:");
     for relay in &relays {
-        println!("   • {}", relay);
+        println!("   - {}", relay);
     }
     println!();
 
@@ -149,9 +161,7 @@ async fn start_bunker() -> Result<()> {
     println!("   4. Pressione Ctrl+C para encerrar");
     println!();
     println!("🔒 Segurança:");
-    println!("   • Chave privada NUNCA sai da YubiKey permanentemente");
-    println!("   • Carregada SOB DEMANDA para cada assinatura");
-    println!("   • Limpa da memória IMEDIATAMENTE após uso");
+    println!("   • Chave carregada SOB DEMANDA para cada assinatura");
     println!("   • PIN necessário para cada leitura");
     println!();
     println!("============================================================\n");
