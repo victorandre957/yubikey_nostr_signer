@@ -11,3 +11,11 @@ hex = "0.4"
 base64 = "0.22"
 aes-gcm = "0.10"
 rand = "0.9.2" 
+nostr = { version = "0.43", features = ["std", "nip04", "nip44", "nip46"] }
+nostr-connect = "0.43"
+nostr-relay-pool = "0.43"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dialoguer = "0.11"
+zeroize = "1.8"

@@ -258,6 +258,38 @@ pub fn write_blob(device: &mut FidoKeyHid, credential_id: &[u8], data: &str) -> 
     Ok(())
 }
 
+/// Returns the decrypted data from a specific entry by ID (for programmatic use)
+pub fn read_blob_entry(device: &mut FidoKeyHid, credential_id: &[u8], entry_id: &str) -> Result<Vec<u8>> {
+    let blob_content = match get_blob_content(device)? {
+        Some(content) => content,
+        None => {
+            return Err(anyhow!("The largeBlob is empty"));
+        }
+    };
+
+    let entries = parse_blob_entries(&blob_content);
+
+    if entries.is_empty() {
+        return Err(anyhow!("No entries found"));
+    }
+
+    // Procura pela entry com o ID especificado
+    for entry in entries {
+        if let Some(colon_pos) = entry.find(':') {
+            let current_id = &entry[..colon_pos];
+            if current_id == entry_id {
+                let encrypted_base64 = &entry[colon_pos + 1..];
+                let encrypted_bytes = general_purpose::STANDARD.decode(encrypted_base64)
+                    .context("Failed to decode base64")?;
+                let decrypted_str = decrypt_data(device, credential_id, &encrypted_bytes)?;
+                return Ok(decrypted_str.into_bytes());
+            }
+        }
+    }
+
+    Err(anyhow!("Entry '{}' not found", entry_id))
+}
+
 pub fn read_blob(device: &mut FidoKeyHid, credential_id: &[u8]) -> Result<()> {
     println!("Reading data...");
 

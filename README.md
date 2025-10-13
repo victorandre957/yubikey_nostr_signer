@@ -8,10 +8,51 @@ yubikey_fido2_teste/
 │   ├── blob_operations.rs # Encryption, storage, and blob operations
 │   ├── auth.rs          # PIN authentication utilities
 │   ├── device.rs        # Device detection and initialization
-│   └── lib.rs           # Library exports and common types
+│   ├── nostr_bunker.rs  # Nostr Bunker (NIP-46) implementation
+│   ├── lib.rs           # Library exports and common types
+│   └── bin/
+│       ├── bunker.rs         # Nostr Bunker server
+│       └── bunker_client.rs  # Test client for bunker
 ├── Cargo.toml           # Dependencies and project configuration
-└── README.md           # This documentation
+├── README.md           # This documentation
+├── BUNKER.md           # Nostr Bunker documentation
+└── run_bunker.sh       # Script to run bunker easily
 ```
+
+## 🆕 Nostr Bunker (NIP-46)
+
+Este projeto agora inclui uma implementação completa de um **Nostr Bunker** seguindo a [NIP-46](https://github.com/nostr-protocol/nips/blob/master/46.md).
+
+### O que é um Nostr Bunker?
+
+Um Nostr Bunker é um signer remoto que mantém suas chaves privadas seguras e permite que aplicativos solicitem assinatura de eventos sem ter acesso direto às chaves.
+
+### Quick Start
+
+**Iniciar o servidor bunker:**
+```bash
+cargo run --bin bunker
+```
+
+**Testar com o cliente:**
+```bash
+cargo run --bin bunker_client
+```
+
+**Ou use o script helper:**
+```bash
+./run_bunker.sh
+```
+
+📖 **Documentação completa**: Veja [BUNKER.md](BUNKER.md) para instruções detalhadas, exemplos de uso e integração com aplicativos Nostr.
+
+### Operações Suportadas
+
+- ✅ Conexão de clientes
+- ✅ Assinatura de eventos
+- ✅ Encriptação/decriptação NIP-04
+- ✅ Encriptação/decriptação NIP-44
+- ✅ Aprovação interativa do usuário
 
 ## 🔧 Module Details
 
