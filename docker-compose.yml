@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  relay:
+    image: scsibug/nostr-rs-relay:latest
+    container_name: nostr-relay
+    ports:
+      - "7777:8080"
+    volumes:
+      - relay-data:/usr/src/app/db
+    networks:
+      - nostr-net
+    restart: unless-stopped
+
+  bunker:
+    build:
+      context: .
+      dockerfile: Dockerfile.bunker
+    container_name: nostr-bunker
+    stdin_open: true
+    tty: true
+    privileged: true
+    environment:
+      - NOSTR_RELAYS=ws://relay:8080
+    volumes:
+      - /dev:/dev
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+    networks:
+      - nostr-net
+    depends_on:
+      - relay
+    restart: "no"
+    command: /bin/bash
+
+  client:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    container_name: nostr-client
+    stdin_open: true
+    tty: true
+    environment:
+      - RELAY_URL=ws://relay:8080
+    networks:
+      - nostr-net
+    depends_on:
+      - relay
+      - bunker
+    restart: "no"
+    command: /bin/bash
+
+networks:
+  nostr-net:
+    driver: bridge
+
+volumes:
+  relay-data:

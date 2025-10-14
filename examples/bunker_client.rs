@@ -108,6 +108,30 @@ async fn test_sign_event(signer: &NostrConnect) -> Result<()> {
     println!("   Content: {}", event.content);
     println!("   Signature: {}...", &event.sig.to_string()[..20]);
 
+    // Publicar no relay
+    print!("\nPublicar no relay? (s/n): ");
+    io::stdout().flush()?;
+    let mut publish = String::new();
+    io::stdin().read_line(&mut publish)?;
+    
+    if publish.trim().to_lowercase() == "s" || publish.trim().to_lowercase() == "sim" {
+        // Obter URL do relay da variável de ambiente ou usar padrão
+        let relay_url = std::env::var("RELAY_URL").unwrap_or_else(|_| "ws://relay:8080".to_string());
+        
+        println!("📡 Conectando ao relay {}...", relay_url);
+        
+        use nostr_relay_pool::prelude::*;
+        let pool = RelayPool::default();
+        pool.add_relay(&relay_url, RelayOptions::default()).await?;
+        pool.connect().await;
+        
+        println!("📤 Publicando evento...");
+        pool.send_event(&event).await?;
+        
+        println!("✅ Evento publicado com sucesso no relay!");
+        println!("   Você pode ler ele usando: nak req -k 1 --limit 5 ws://relay:8080");
+    }
+
     Ok(())
 }
 
