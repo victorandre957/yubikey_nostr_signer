@@ -15,11 +15,9 @@ const RP_ID: &str = "example.com";
 const CHALLENGE: &[u8] = b"a-random-challenge-string";
 
 pub fn get_credential_id(device: &mut FidoKeyHid) -> Result<Vec<u8>> {
-    println!("Setting up credential...");
     let mut pin = get_pin_from_user()?;
 
     if let Ok(assertion) = device.get_assertion(RP_ID, CHALLENGE, &[], Some(pin.as_str())) {
-        println!("Credential found.");
         unsafe {
             let bytes = pin.as_bytes_mut();
             bytes.fill(0);
@@ -28,7 +26,6 @@ pub fn get_credential_id(device: &mut FidoKeyHid) -> Result<Vec<u8>> {
         return Ok(assertion.credential_id);
     }
 
-    println!("Creating new credential...");
     let user = PublicKeyCredentialUserEntity {
         id: b"user-id-for-large-blob".to_vec(),
         name: "test.user".to_string(),
@@ -59,7 +56,6 @@ pub fn get_credential_id(device: &mut FidoKeyHid) -> Result<Vec<u8>> {
         bytes.fill(0);
     }
 
-    println!("Credential created successfully!");
     Ok(attestation.credential_descriptor.id)
 }
 
