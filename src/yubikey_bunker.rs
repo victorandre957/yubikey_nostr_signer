@@ -4,7 +4,7 @@ use nostr::prelude::*;
 use nostr_relay_pool::prelude::*;
 use std::sync::Arc;
 
-use crate::yubikey_keys::YubikeyKeyManager;
+use crate::yubikey_helper::YubikeyKeyManager;
 
 pub struct YubikeyNostrBunker {
     signer_key: Keys,
@@ -23,7 +23,7 @@ impl YubikeyNostrBunker {
         let yubikey_manager = Arc::new(YubikeyKeyManager::new()?);
         let signer_key = Keys::generate();
 
-        println!("🔐 Chave temporária NIP-46 gerada:");
+        println!("🔐 Temporary NIP-46 key generated:");
         println!("   Pubkey: {}\n", signer_key.public_key().to_bech32()?);
 
         let relay_urls: Vec<String> = relays.into_iter().map(|r| r.as_ref().to_string()).collect();
@@ -49,9 +49,9 @@ impl YubikeyNostrBunker {
     }
 
     pub async fn serve(self) -> Result<()> {
-        println!("🔑 Nostr Bunker (YubiKey) iniciado!");
+        println!("🔑 Nostr Bunker (YubiKey) started!");
         println!("📋 Bunker URI: {}\n", self.bunker_uri()?);
-        println!("⏳ Aguardando requisições...\n");
+        println!("⏳ Waiting for requests...\n");
 
         for relay_url in &self.relays {
             self.pool
@@ -74,12 +74,11 @@ impl YubikeyNostrBunker {
         let mut notifications = self.pool.notifications();
 
         while let Ok(notification) = notifications.recv().await {
-            if let RelayPoolNotification::Event { event, .. } = notification {
-                if event.kind == Kind::NostrConnect {
-                    if let Err(e) = self.handle_request(&event, &user_pubkey).await {
-                        eprintln!("❌ Erro ao processar requisição: {}", e);
-                    }
-                }
+            if let RelayPoolNotification::Event { event, .. } = notification
+                && event.kind == Kind::NostrConnect
+                && let Err(e) = self.handle_request(&event, &user_pubkey).await
+            {
+                eprintln!("❌ Error processing request: {}", e);
             }
         }
 
@@ -92,7 +91,7 @@ impl YubikeyNostrBunker {
 
         let msg: NostrConnectMessage = NostrConnectMessage::from_json(decrypted)?;
 
-        println!("📨 Requisição recebida de: {}", event.pubkey);
+        println!("📨 Request received from: {}", event.pubkey);
 
         let (id, request) = match msg {
             NostrConnectMessage::Request { id, method, params } => {
@@ -100,30 +99,30 @@ impl YubikeyNostrBunker {
                 (id, req)
             }
             _ => {
-                println!("⚠️  Mensagem não é uma requisição, ignorando");
+                println!("⚠️  Message is not a request, ignoring");
                 return Ok(());
             }
         };
 
         if !self.should_approve(&event.pubkey, &request) {
-            println!("❌ Requisição negada pelo usuário\n");
+            println!("❌ Request denied by user\n");
 
-            let response = NostrConnectResponse::with_error("Requisição negada pelo usuário");
+            let response = NostrConnectResponse::with_error("Request denied by user");
             self.send_response(&event.pubkey, &id, response).await?;
             return Ok(());
         }
 
         let response = match request {
             NostrConnectRequest::Connect { .. } => {
-                println!("✅ Conexão aprovada\n");
+                println!("✅ Connection approved\n");
                 NostrConnectResponse::with_result(ResponseResult::Ack)
             }
             NostrConnectRequest::GetPublicKey => {
-                println!("✅ Chave pública enviada\n");
+                println!("✅ Public key sent\n");
                 NostrConnectResponse::with_result(ResponseResult::GetPublicKey(*user_pubkey))
             }
             NostrConnectRequest::SignEvent(unsigned) => {
-                println!("📝 Assinando evento com YubiKey...");
+                println!("📝 Signing event with YubiKey...");
 
                 match self.yubikey_manager.with_key(|keys| {
                     unsigned
@@ -131,55 +130,55 @@ impl YubikeyNostrBunker {
                         .map_err(|e| anyhow::anyhow!(e))
                 }) {
                     Ok(signed_event) => {
-                        println!("✅ Evento assinado com sucesso");
+                        println!("✅ Event signed successfully");
                         println!("   ID: {}\n", signed_event.id);
                         NostrConnectResponse::with_result(ResponseResult::SignEvent(Box::new(
                             signed_event,
                         )))
                     }
                     Err(e) => {
-                        eprintln!("❌ Erro ao assinar: {}\n", e);
-                        NostrConnectResponse::with_error(format!("Erro ao assinar: {}", e))
+                        eprintln!("❌ Error signing: {}\n", e);
+                        NostrConnectResponse::with_error(format!("Error signing: {}", e))
                     }
                 }
             }
             NostrConnectRequest::Nip04Encrypt { public_key, text } => {
-                println!("🔐 Encriptando com NIP-04...");
+                println!("🔐 Encrypting with NIP-04...");
 
                 match self.yubikey_manager.with_key(|keys| {
                     nip04::encrypt(keys.secret_key(), &public_key, &text)
-                        .map_err(|e| anyhow::anyhow!("Erro NIP-04: {}", e))
+                        .map_err(|e| anyhow::anyhow!("NIP-04 error: {}", e))
                 }) {
                     Ok(ciphertext) => {
-                        println!("✅ Encriptado com sucesso\n");
+                        println!("✅ Encrypted successfully\n");
                         NostrConnectResponse::with_result(ResponseResult::Nip04Encrypt {
                             ciphertext,
                         })
                     }
-                    Err(e) => NostrConnectResponse::with_error(format!("Erro: {}", e)),
+                    Err(e) => NostrConnectResponse::with_error(format!("Error: {}", e)),
                 }
             }
             NostrConnectRequest::Nip04Decrypt {
                 public_key,
                 ciphertext,
             } => {
-                println!("🔓 Decriptando com NIP-04...");
+                println!("🔓 Decrypting with NIP-04...");
 
                 match self.yubikey_manager.with_key(|keys| {
                     nip04::decrypt(keys.secret_key(), &public_key, &ciphertext)
-                        .map_err(|e| anyhow::anyhow!("Erro NIP-04: {}", e))
+                        .map_err(|e| anyhow::anyhow!("NIP-04 error: {}", e))
                 }) {
                     Ok(plaintext) => {
-                        println!("✅ Decriptado com sucesso\n");
+                        println!("✅ Decrypted successfully\n");
                         NostrConnectResponse::with_result(ResponseResult::Nip04Decrypt {
                             plaintext,
                         })
                     }
-                    Err(e) => NostrConnectResponse::with_error(format!("Erro: {}", e)),
+                    Err(e) => NostrConnectResponse::with_error(format!("Error: {}", e)),
                 }
             }
             NostrConnectRequest::Nip44Encrypt { public_key, text } => {
-                println!("🔐 Encriptando com NIP-44...");
+                println!("🔐 Encrypting with NIP-44...");
 
                 match self.yubikey_manager.with_key(|keys| {
                     nip44::encrypt(
@@ -188,38 +187,38 @@ impl YubikeyNostrBunker {
                         &text,
                         nip44::Version::default(),
                     )
-                    .map_err(|e| anyhow::anyhow!("Erro NIP-44: {}", e))
+                    .map_err(|e| anyhow::anyhow!("NIP-44 error: {}", e))
                 }) {
                     Ok(ciphertext) => {
-                        println!("✅ Encriptado com sucesso\n");
+                        println!("✅ Encrypted successfully\n");
                         NostrConnectResponse::with_result(ResponseResult::Nip44Encrypt {
                             ciphertext,
                         })
                     }
-                    Err(e) => NostrConnectResponse::with_error(format!("Erro: {}", e)),
+                    Err(e) => NostrConnectResponse::with_error(format!("Error: {}", e)),
                 }
             }
             NostrConnectRequest::Nip44Decrypt {
                 public_key,
                 ciphertext,
             } => {
-                println!("🔓 Decriptando com NIP-44...");
+                println!("🔓 Decrypting with NIP-44...");
 
                 match self.yubikey_manager.with_key(|keys| {
                     nip44::decrypt(keys.secret_key(), &public_key, &ciphertext)
-                        .map_err(|e| anyhow::anyhow!("Erro NIP-44: {}", e))
+                        .map_err(|e| anyhow::anyhow!("NIP-44 error: {}", e))
                 }) {
                     Ok(plaintext) => {
-                        println!("✅ Decriptado com sucesso\n");
+                        println!("✅ Decrypted successfully\n");
                         NostrConnectResponse::with_result(ResponseResult::Nip44Decrypt {
                             plaintext,
                         })
                     }
-                    Err(e) => NostrConnectResponse::with_error(format!("Erro: {}", e)),
+                    Err(e) => NostrConnectResponse::with_error(format!("Error: {}", e)),
                 }
             }
             NostrConnectRequest::Ping => {
-                println!("🏓 Pong enviado\n");
+                println!("🏓 Pong sent\n");
                 NostrConnectResponse::with_result(ResponseResult::Ack)
             }
         };
@@ -250,7 +249,7 @@ impl YubikeyNostrBunker {
 
         self.pool.send_event(&event).await?;
 
-        println!("📤 Resposta enviada\n");
+        println!("📤 Response sent\n");
 
         Ok(())
     }
@@ -260,26 +259,23 @@ impl YubikeyNostrBunker {
             NostrConnectRequest::Connect {
                 public_key: req_pk, ..
             } => {
-                println!("\n🔔 Nova solicitação de conexão!");
-                println!("   De: {}", client_pubkey);
+                println!("\n🔔 New connection request!");
+                println!("   From: {}", client_pubkey);
                 println!("   App pubkey: {}", req_pk);
 
                 Confirm::new()
-                    .with_prompt("Aprovar conexão?")
+                    .with_prompt("Approve connection?")
                     .default(false)
                     .interact()
                     .unwrap_or(false)
             }
             NostrConnectRequest::GetPublicKey => {
-                println!(
-                    "🔑 Solicitação para obter chave pública de {}",
-                    client_pubkey
-                );
+                println!("🔑 Request to get public key from {}", client_pubkey);
                 true
             }
             NostrConnectRequest::SignEvent(event) => {
-                println!("\n📝 Solicitação para assinar evento:");
-                println!("   De: {}", client_pubkey);
+                println!("\n📝 Request to sign event:");
+                println!("   From: {}", client_pubkey);
                 println!("   Kind: {}", event.kind);
                 println!(
                     "   Content: {}",
@@ -291,7 +287,7 @@ impl YubikeyNostrBunker {
                 );
 
                 Confirm::new()
-                    .with_prompt("Assinar este evento?")
+                    .with_prompt("Sign this event?")
                     .default(true)
                     .interact()
                     .unwrap_or(false)
@@ -300,11 +296,11 @@ impl YubikeyNostrBunker {
                 public_key: target,
                 text,
             } => {
-                println!("\n🔐 Solicitação para encriptar (NIP-04):");
-                println!("   De: {}", client_pubkey);
-                println!("   Para: {}", target);
+                println!("\n🔐 Request to encrypt (NIP-04):");
+                println!("   From: {}", client_pubkey);
+                println!("   To: {}", target);
                 println!(
-                    "   Texto: {}",
+                    "   Text: {}",
                     if text.len() > 50 {
                         format!("{}...", &text[..50])
                     } else {
@@ -313,7 +309,7 @@ impl YubikeyNostrBunker {
                 );
 
                 Confirm::new()
-                    .with_prompt("Encriptar?")
+                    .with_prompt("Encrypt?")
                     .default(true)
                     .interact()
                     .unwrap_or(false)
@@ -322,8 +318,8 @@ impl YubikeyNostrBunker {
                 public_key: from,
                 ciphertext,
             } => {
-                println!("\n🔓 Solicitação para decriptar (NIP-04):");
-                println!("   De: {}", client_pubkey);
+                println!("\n🔓 Request to decrypt (NIP-04):");
+                println!("   From: {}", client_pubkey);
                 println!("   From pubkey: {}", from);
                 println!(
                     "   Ciphertext: {}...",
@@ -331,7 +327,7 @@ impl YubikeyNostrBunker {
                 );
 
                 Confirm::new()
-                    .with_prompt("Decriptar?")
+                    .with_prompt("Decrypt?")
                     .default(true)
                     .interact()
                     .unwrap_or(false)
@@ -340,11 +336,11 @@ impl YubikeyNostrBunker {
                 public_key: target,
                 text,
             } => {
-                println!("\n🔐 Solicitação para encriptar (NIP-44):");
-                println!("   De: {}", client_pubkey);
-                println!("   Para: {}", target);
+                println!("\n🔐 Request to encrypt (NIP-44):");
+                println!("   From: {}", client_pubkey);
+                println!("   To: {}", target);
                 println!(
-                    "   Texto: {}",
+                    "   Text: {}",
                     if text.len() > 50 {
                         format!("{}...", &text[..50])
                     } else {
@@ -353,7 +349,7 @@ impl YubikeyNostrBunker {
                 );
 
                 Confirm::new()
-                    .with_prompt("Encriptar?")
+                    .with_prompt("Encrypt?")
                     .default(true)
                     .interact()
                     .unwrap_or(false)
@@ -362,8 +358,8 @@ impl YubikeyNostrBunker {
                 public_key: from,
                 ciphertext,
             } => {
-                println!("\n🔓 Solicitação para decriptar (NIP-44):");
-                println!("   De: {}", client_pubkey);
+                println!("\n🔓 Request to decrypt (NIP-44):");
+                println!("   From: {}", client_pubkey);
                 println!("   From pubkey: {}", from);
                 println!(
                     "   Ciphertext: {}...",
@@ -371,13 +367,13 @@ impl YubikeyNostrBunker {
                 );
 
                 Confirm::new()
-                    .with_prompt("Decriptar?")
+                    .with_prompt("Decrypt?")
                     .default(true)
                     .interact()
                     .unwrap_or(false)
             }
             NostrConnectRequest::Ping => {
-                println!("🏓 Ping recebido de {}", client_pubkey);
+                println!("🏓 Ping received from {}", client_pubkey);
                 true
             }
         }
