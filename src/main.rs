@@ -4,7 +4,7 @@ mod credential;
 mod device;
 mod encryption;
 mod yubikey_bunker;
-mod yubikey_keys;
+mod yubikey_helper;
 
 use anyhow::{Context, Result, anyhow};
 use std::io::{self, Write};
@@ -19,11 +19,11 @@ async fn main() -> Result<()> {
     println!("🔐 YubiKey Nostr Manager\n");
 
     loop {
-        println!("\n📋 Menu Principal:");
-        println!("1. 🔑 Gerenciar Chaves");
-        println!("2. 🚀 Iniciar Bunker NIP-46");
-        println!("3. 🚪 Sair");
-        print!("\nOpção (1-3): ");
+        println!("\n📋 Main Menu:");
+        println!("1. 🔑 Manage Keys");
+        println!("2. 🚀 Start NIP-46 Bunker");
+        println!("3. 🚪 Exit");
+        print!("\nOption (1-3): ");
         io::stdout().flush()?;
 
         let mut input = String::new();
@@ -33,20 +33,20 @@ async fn main() -> Result<()> {
         match choice {
             "1" => {
                 if let Err(e) = manage_keys().await {
-                    eprintln!("❌ Erro: {}", e);
+                    eprintln!("❌ Error: {}", e);
                 }
             }
             "2" => {
                 if let Err(e) = start_bunker().await {
-                    eprintln!("❌ Erro ao iniciar bunker: {}", e);
+                    eprintln!("❌ Error starting bunker: {}", e);
                 }
             }
             "3" => {
-                println!("👋 Saindo...");
+                println!("👋 Exiting...");
                 break;
             }
             _ => {
-                println!("❌ Opção inválida.");
+                println!("❌ Invalid option.");
             }
         }
     }
@@ -55,23 +55,23 @@ async fn main() -> Result<()> {
 }
 
 async fn manage_keys() -> Result<()> {
-    let mut device = find_fido_device().context("Nenhum dispositivo FIDO2 encontrado.")?;
-    println!("✅ Dispositivo FIDO2 conectado!");
+    let mut device = find_fido_device().context("No FIDO2 device found.")?;
+    println!("✅ FIDO2 device connected!");
 
     if !is_supported(&device)? {
-        return Err(anyhow!("Este dispositivo não suporta largeBlob."));
+        return Err(anyhow!("This device does not support largeBlob."));
     }
 
     let credential_id =
-        get_credential_id(&mut device).context("Falha ao configurar credencial.")?;
+        get_credential_id(&mut device).context("Failed to configure credential.")?;
 
     loop {
-        println!("\n🔑 Gerenciamento de Chaves:");
-        println!("1. 💾 Armazenar chave");
-        println!("2. 👀 Ler chave");
-        println!("3. 🗑️  Deletar chave");
-        println!("4. ⬅️  Voltar");
-        print!("\nOpção (1-4): ");
+        println!("\n🔑 Key Management:");
+        println!("1. 💾 Store key");
+        println!("2. 👀 Read key");
+        println!("3. 🗑️  Delete key");
+        println!("4. ⬅️  Back");
+        print!("\nOption (1-4): ");
         io::stdout().flush()?;
 
         let mut input = String::new();
@@ -80,31 +80,31 @@ async fn manage_keys() -> Result<()> {
 
         match choice {
             "1" => {
-                print!("\n📝 Digite a chave privada (hex): ");
+                print!("\n📝 Enter private key (hex): ");
                 io::stdout().flush()?;
                 let mut data_input = String::new();
                 io::stdin().read_line(&mut data_input)?;
                 let data_to_write = data_input.trim();
 
                 if let Err(e) = write_blob(&mut device, &credential_id, data_to_write) {
-                    println!("❌ Erro: {}", e);
+                    println!("❌ Error: {}", e);
                 }
             }
             "2" => {
                 if let Err(e) = read_blob(&mut device, &credential_id) {
-                    println!("❌ Erro: {}", e);
+                    println!("❌ Error: {}", e);
                 }
             }
             "3" => {
                 if let Err(e) = delete_single_entry(&mut device) {
-                    println!("❌ Erro: {}", e);
+                    println!("❌ Error: {}", e);
                 }
             }
             "4" => {
                 break;
             }
             _ => {
-                println!("❌ Opção inválida.");
+                println!("❌ Invalid option.");
             }
         }
     }
@@ -113,11 +113,11 @@ async fn manage_keys() -> Result<()> {
 }
 
 async fn start_bunker() -> Result<()> {
-    println!("\n🚀 Iniciando Bunker NIP-46...\n");
+    println!("\n🚀 Starting NIP-46 Bunker...\n");
 
-    dotenvy::dotenv().context("Arquivo .env não encontrado")?;
+    dotenvy::dotenv().context(".env file not found")?;
 
-    let relays_str = std::env::var("NOSTR_RELAYS").context("NOSTR_RELAYS não definido no .env")?;
+    let relays_str = std::env::var("NOSTR_RELAYS").context("NOSTR_RELAYS not defined in .env")?;
 
     let relays: Vec<&str> = relays_str
         .split(',')
@@ -126,7 +126,7 @@ async fn start_bunker() -> Result<()> {
         .collect();
 
     if relays.is_empty() {
-        anyhow::bail!("Nenhum relay configurado");
+        anyhow::bail!("No relays configured");
     }
 
     println!("📡 Relays:");
@@ -137,13 +137,13 @@ async fn start_bunker() -> Result<()> {
 
     let secret = Some("yubikey-secure-token".to_string());
 
-    let bunker = YubikeyNostrBunker::new(relays, secret).context("Falha ao inicializar bunker")?;
+    let bunker = YubikeyNostrBunker::new(relays, secret).context("Failed to initialize bunker")?;
 
-    println!("💡 Compartilhe o URI acima com aplicativos Nostr");
-    println!("🔒 Chave carregada sob demanda para cada operação");
-    println!("   Pressione Ctrl+C para encerrar\n");
+    println!("💡 Share the URI above with Nostr apps");
+    println!("🔒 Key loaded on-demand for each operation");
+    println!("   Press Ctrl+C to stop\n");
 
-    bunker.serve().await.context("Erro ao executar bunker")?;
+    bunker.serve().await.context("Error running bunker")?;
 
     Ok(())
 }

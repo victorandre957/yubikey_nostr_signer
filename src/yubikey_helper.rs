@@ -16,34 +16,34 @@ pub struct YubikeyKeyManager {
 
 impl YubikeyKeyManager {
     pub fn new() -> Result<Self> {
-        println!("🔑 Inicializando YubiKey...");
+        println!("🔑 Initializing YubiKey...");
 
-        let mut device = find_fido_device()
-            .context("YubiKey não encontrada. Conecte o dispositivo e tente novamente.")?;
+        let mut device =
+            find_fido_device().context("YubiKey not found. Connect the device and try again.")?;
 
         if !is_supported(&device)? {
-            return Err(anyhow!("Este dispositivo não suporta largeBlob"));
+            return Err(anyhow!("This device does not support largeBlob"));
         }
 
         let credential_id =
-            get_credential_id(&mut device).context("Falha ao configurar credencial")?;
+            get_credential_id(&mut device).context("Failed to configure credential")?;
 
-        println!("✅ YubiKey configurada com sucesso\n");
+        println!("✅ YubiKey configured successfully\n");
 
         let (selected_entry_index, key_data) =
             blob_operations::select_and_read_entry(&mut device, &credential_id)
-                .context("Falha ao selecionar entrada")?;
+                .context("Failed to select entry")?;
 
-        println!("\n🔍 Validando chave selecionada...");
-        let key_hex = String::from_utf8(key_data).context("Dados da chave inválidos")?;
+        println!("\n🔍 Validating selected key...");
+        let key_hex = String::from_utf8(key_data).context("Invalid key data")?;
 
-        let keys = Keys::parse(&key_hex).context("Falha ao parsear chave privada")?;
+        let keys = Keys::parse(&key_hex).context("Failed to parse private key")?;
 
         let cached_public_key = keys.public_key();
 
         drop(keys);
 
-        println!("✅ Chave válida!");
+        println!("✅ Valid key!");
         println!("   Pubkey: {}\n", cached_public_key.to_bech32()?);
 
         Ok(Self {
@@ -59,25 +59,25 @@ impl YubikeyKeyManager {
     }
 
     pub fn load_private_key(&self) -> Result<Keys> {
-        println!("🔐 Carregando chave da YubiKey para assinatura...");
+        println!("🔐 Loading key from YubiKey for signing...");
 
         let mut device = self
             .device
             .lock()
-            .map_err(|_| anyhow!("Falha ao acessar dispositivo"))?;
+            .map_err(|_| anyhow!("Failed to access device"))?;
 
         let key_data = blob_operations::read_blob_entry_by_index(
             &mut device,
             &self.credential_id,
             self.selected_entry_index,
         )
-        .context("Falha ao ler entrada da YubiKey")?;
+        .context("Failed to read entry from YubiKey")?;
 
-        let key_hex = String::from_utf8(key_data).context("Dados da chave inválidos")?;
+        let key_hex = String::from_utf8(key_data).context("Invalid key data")?;
 
-        let keys = Keys::parse(&key_hex).context("Falha ao parsear chave privada")?;
+        let keys = Keys::parse(&key_hex).context("Failed to parse private key")?;
 
-        println!("✅ Chave carregada (será descartada após uso)\n");
+        println!("✅ Key loaded (will be discarded after use)\n");
 
         Ok(keys)
     }
@@ -89,7 +89,7 @@ impl YubikeyKeyManager {
         let keys = self.load_private_key()?;
         let result = operation(&keys);
         drop(keys);
-        println!("🧹 Chave removida da memória\n");
+        println!("🧹 Key removed from memory\n");
         result
     }
 }

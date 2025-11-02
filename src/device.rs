@@ -14,12 +14,7 @@ pub fn find_fido_device() -> Result<FidoKeyHid> {
 }
 
 pub fn is_supported(device: &FidoKeyHid) -> Result<bool> {
-    if device
+    Ok(device
         .enable_info_option(&InfoOption::LargeBlobs)?
-        .is_some()
-    {
-        Ok(true)
-    } else {
-        Ok(false)
-    }
+        .is_some())
 }
