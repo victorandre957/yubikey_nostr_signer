@@ -3,6 +3,7 @@ use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::Aead};
 use anyhow::{Context, Result, anyhow};
 use ctap_hid_fido2::fidokey::FidoKeyHid;
 use rand::Rng;
+use zeroize::Zeroize;
 
 pub fn encrypt_data(
     device: &mut FidoKeyHid,
@@ -31,7 +32,7 @@ pub fn encrypt_data(
     result.extend_from_slice(&nonce_bytes);
     result.extend_from_slice(&ciphertext);
 
-    hmac_secret.fill(0);
+    hmac_secret.zeroize();
 
     Ok(result)
 }
@@ -67,7 +68,7 @@ pub fn decrypt_data(
 
     let result = String::from_utf8(plaintext_bytes).context("Invalid decrypted data")?;
 
-    hmac_secret.fill(0);
+    hmac_secret.zeroize();
 
     Ok(result)
 }

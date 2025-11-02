@@ -10,18 +10,17 @@ use ctap_hid_fido2::{
     },
     public_key_credential_user_entity::PublicKeyCredentialUserEntity,
 };
+use zeroize::Zeroize;
 
-const RP_ID: &str = "example.com";
-const CHALLENGE: &[u8] = b"a-random-challenge-string";
+const RP_ID: &str = "nostr.bunker.yubikey";
+const CHALLENGE: &[u8] = b"yubikey-nostr-bunker-challenge";
+
 
 pub fn get_credential_id(device: &mut FidoKeyHid) -> Result<Vec<u8>> {
     let mut pin = get_pin_from_user()?;
 
     if let Ok(assertion) = device.get_assertion(RP_ID, CHALLENGE, &[], Some(pin.as_str())) {
-        unsafe {
-            let bytes = pin.as_bytes_mut();
-            bytes.fill(0);
-        }
+        pin.zeroize();
 
         return Ok(assertion.credential_id);
     }
@@ -51,10 +50,7 @@ pub fn get_credential_id(device: &mut FidoKeyHid) -> Result<Vec<u8>> {
         .make_credential_with_args(&args)
         .context("Failed to create credential.")?;
 
-    unsafe {
-        let bytes = pin.as_bytes_mut();
-        bytes.fill(0);
-    }
+    pin.zeroize();
 
     Ok(attestation.credential_descriptor.id)
 }
@@ -79,10 +75,7 @@ pub fn get_hmac_secret(
         )
         .context("Failed to get encryption key")?;
 
-    unsafe {
-        let bytes = pin.as_bytes_mut();
-        bytes.fill(0);
-    }
+    pin.zeroize();
 
     for extension in &assertion.extensions {
         if let AssertionExtension::HmacSecret(Some(hmac_secret)) = extension {
